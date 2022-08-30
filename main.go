@@ -19,35 +19,47 @@ var (
 	endMainCh = make(chan string)
 )
 
-// structs
 type img struct {
-	file fs.DirEntry
+	file     fs.DirEntry
+	index    int64
+	finished bool
 }
 
 type imgs struct {
 	Files []fs.DirEntry
+	count int64
 }
 
 // files handler
 func firstGorou() {
-	br := false
+	var (
+		lenFs    = int64(-1)
+		counterF int64
+	)
+
 	for {
-		if br {
+		if lenFs == counterF {
 			endMainCh <- "end of main goroutine"
 			break
 		}
 
 		select {
 		case imgs := <-firstCh:
-			for _, file := range imgs.Files {
-				fmt.Println(file.Name())
+			lenFs = imgs.count
+			for i, file := range imgs.Files {
+				go secondGorou(file, i)
 			}
-			br = true
+		case f := <-secondCh:
+			f.finished = true
+			counterF++
+			fmt.Println(f.file.Name(), f.index, counterF)
 		}
 	}
 }
 
-func secondGorou() {}
+func secondGorou(f fs.DirEntry, i int) {
+	secondCh <- img{file: f, index: int64(i)}
+}
 
 func thirdGorou() {}
 
@@ -60,7 +72,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	firstCh <- imgs{Files: fs}
+	firstCh <- imgs{Files: fs, count: int64(len(fs))}
 
 	fmt.Println(<-endMainCh)
 }
