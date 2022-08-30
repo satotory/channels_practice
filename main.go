@@ -2,27 +2,47 @@ package main
 
 import (
 	"fmt"
+	"image"
+	"image/png"
 	"io/fs"
 	"log"
 	"os"
+	"time"
+
+	"github.com/nfnt/resize"
 )
 
-const FOLDER = "./images"
-const ERR_READDIR = "Read dir error"
+const (
+	FOLDER    = "./images/"
+	RESFOLDER = "./resized_images/"
+)
+
+const (
+	ERR_READDIR       = "Read dir error"
+	ERR_OPENINGFILE   = "os Opening file error"
+	ERR_DECODINGFILE  = "png Decoding file error"
+	ERR_CREATING_FILE = "os Create file error"
+	ERR_ENCODING_PIC  = "png Encode pic error"
+)
 
 // chanels
 var (
 	firstCh   = make(chan imgs)
 	secondCh  = make(chan img)
 	thirdCh   = make(chan img)
-	endCh     = make(chan bool)
+	fourthCh  = make(chan img)
+	endCh     = make(chan img)
 	endMainCh = make(chan string)
 )
 
 type img struct {
-	file     fs.DirEntry
-	index    int64
-	finished bool
+	file      fs.DirEntry
+	index     int64
+	openedImg *os.File
+	saveFile  *os.File
+	decoImg   image.Image
+	resImg    image.Image
+	finished  bool
 }
 
 type imgs struct {
@@ -31,7 +51,7 @@ type imgs struct {
 }
 
 // files handler
-func firstGorou() {
+func selectCases() {
 	var (
 		lenFs    = int64(-1)
 		counterF int64
@@ -47,9 +67,16 @@ func firstGorou() {
 		case imgs := <-firstCh:
 			lenFs = imgs.count
 			for i, file := range imgs.Files {
-				go secondGorou(file, i)
+				img := img{file: file, index: int64(i)}
+				go img.openingGorou()
 			}
 		case f := <-secondCh:
+			go f.decodingImgGorou()
+		case f := <-thirdCh:
+			go f.createFileToSave()
+		case f := <-fourthCh:
+			go f.resizeAndEncodeImg()
+		case f := <-endCh:
 			f.finished = true
 			counterF++
 			fmt.Println(f.file.Name(), f.index, counterF)
@@ -57,14 +84,58 @@ func firstGorou() {
 	}
 }
 
-func secondGorou(f fs.DirEntry, i int) {
-	secondCh <- img{file: f, index: int64(i)}
+func (f img) openingGorou() {
+	var err error
+
+	f.openedImg, err = os.Open(FOLDER + f.file.Name())
+	if err != nil {
+		log.Println(ERR_OPENINGFILE)
+		log.Fatal(err)
+	}
+
+	secondCh <- f
 }
 
-func thirdGorou() {}
+func (f img) decodingImgGorou() {
+	var err error
 
-func main() {
-	go firstGorou()
+	f.decoImg, err = png.Decode(f.openedImg)
+	if err != nil {
+		log.Println(ERR_DECODINGFILE)
+		log.Fatal(err)
+	}
+	f.openedImg.Close()
+
+	thirdCh <- f
+}
+
+func (f img) createFileToSave() {
+	var err error
+
+	f.saveFile, err = os.Create(RESFOLDER + f.file.Name())
+	if err != nil {
+		log.Println(ERR_CREATING_FILE)
+		log.Fatal(err)
+	}
+
+	fourthCh <- f
+}
+
+func (f img) resizeAndEncodeImg() {
+	defer f.saveFile.Close()
+	f.resImg = resize.Thumbnail(300, 200, f.decoImg, resize.Lanczos3)
+
+	err := png.Encode(f.saveFile, f.resImg)
+	if err != nil {
+		log.Println()
+		log.Fatal(err)
+	}
+	endCh <- f
+}
+
+func run() {
+	start := time.Now()
+	go selectCases()
 
 	fs, err := os.ReadDir(FOLDER)
 	if err != nil {
@@ -74,5 +145,10 @@ func main() {
 
 	firstCh <- imgs{Files: fs, count: int64(len(fs))}
 
-	fmt.Println(<-endMainCh)
+	elapsed := time.Since(start)
+	log.Printf("\nExecution time %s\n%s", elapsed, <-endMainCh)
+}
+
+func main() {
+	run()
 }
