@@ -3,18 +3,15 @@ package main
 import (
 	"fmt"
 	"image"
-	"image/png"
 	"io/fs"
 	"log"
 	"os"
 	"time"
-
-	"github.com/nfnt/resize"
 )
 
 const (
-	FOLDER    = "./images/"
-	RESFOLDER = "./resized_images/"
+	FOLDER    = "../images/"
+	RESFOLDER = "../resized_images/"
 )
 
 const (
@@ -34,6 +31,7 @@ var (
 	endCh     = make(chan img)
 	endMainCh = make(chan string)
 )
+var start = time.Now()
 
 type img struct {
 	file      fs.DirEntry
@@ -77,64 +75,19 @@ func selectCases() {
 		case f := <-fourthCh:
 			go f.resizeAndEncodeImg()
 		case f := <-endCh:
+			elapsed := time.Since(start)
 			f.finished = true
 			counterF++
 			fmt.Println(f.file.Name(), f.index, counterF)
+			fmt.Println("Execution time:")
+			fmt.Println(elapsed.Seconds())
+			fmt.Println("-+-+-+-+-+-")
+
 		}
 	}
 }
 
-func (f img) openingGorou() {
-	var err error
-
-	f.openedImg, err = os.Open(FOLDER + f.file.Name())
-	if err != nil {
-		log.Println(ERR_OPENINGFILE)
-		log.Fatal(err)
-	}
-
-	secondCh <- f
-}
-
-func (f img) decodingImgGorou() {
-	var err error
-
-	f.decoImg, err = png.Decode(f.openedImg)
-	if err != nil {
-		log.Println(ERR_DECODINGFILE)
-		log.Fatal(err)
-	}
-	f.openedImg.Close()
-
-	thirdCh <- f
-}
-
-func (f img) createFileToSave() {
-	var err error
-
-	f.saveFile, err = os.Create(RESFOLDER + f.file.Name())
-	if err != nil {
-		log.Println(ERR_CREATING_FILE)
-		log.Fatal(err)
-	}
-
-	fourthCh <- f
-}
-
-func (f img) resizeAndEncodeImg() {
-	defer f.saveFile.Close()
-	f.resImg = resize.Thumbnail(300, 200, f.decoImg, resize.Lanczos3)
-
-	err := png.Encode(f.saveFile, f.resImg)
-	if err != nil {
-		log.Println()
-		log.Fatal(err)
-	}
-	endCh <- f
-}
-
 func run() {
-	start := time.Now()
 	go selectCases()
 
 	fs, err := os.ReadDir(FOLDER)
@@ -145,8 +98,7 @@ func run() {
 
 	firstCh <- imgs{Files: fs, count: int64(len(fs))}
 
-	elapsed := time.Since(start)
-	log.Printf("\nExecution time %s\n%s", elapsed, <-endMainCh)
+	fmt.Println(<-endMainCh)
 }
 
 func main() {
